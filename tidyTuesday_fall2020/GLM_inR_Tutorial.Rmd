@@ -1,0 +1,882 @@
+---
+title: "GLM in R Tutorial"
+author: "Ana Miller-ter Kuile"
+date: "11/10/20"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, out.width = "100%")
+```
+
+# Packages
+
+Some useful formatting and visualization packages for this R Markdown:
+
+```{r, warning = FALSE}
+library(ggplot2) #plotting
+library(tidyverse) #data tidying power
+library(gt) #tables
+library(here)
+```
+
+The statistics packages you'll need for this tutorial:
+
+```{r}
+library(MASS) #glm.nb for negative binomial models
+library(glmmTMB) #Salamanders dataset and lots of families
+library(lme4) #pseudo-R2 and and mixed model functionality
+library(MuMIn) #dredge function for comparing models, AIC, marginal R^2 for mixed models
+library(sjmisc) #pseudo R^2 - but I think gets loaded as a dependency
+library(DHARMa) #model diagnostics
+library(effects) #what do my marginal effects look like?
+library(performance) #binomial model diagnostics
+library(emmeans) #post hoc for categorical predictors
+```
+
+You can install and load packages reproducibly across computers:
+
+```{r}
+package.list <- c("here", "tidyverse", 
+                  "ggplot2", "gt",
+                  "MASS", "glmmTMB",
+                  "lme4", "MuMIn", 
+                  "sjmisc", "DHARMa", 
+                  "effects", "performance",
+                  "emmeans", "ggeffects")
+
+## Installing them if they aren't already on the computer
+new.packages <- package.list[!(package.list %in% installed.packages()[,"Package"])]
+if(length(new.packages)) install.packages(new.packages)
+
+## And loading them
+for(i in package.list){library(i, character.only = T)}
+```
+
+# Learning goals
+
+1. Know that different kinds of ecological data require different **GLM distributions** (with a nifty table as a resource)
+ 
+2. Know how to **fit a GLM in R**, which includes three steps:
+
+  + *fit a full model* based on an ecological question
+  
+  + *choose the best-fitting model* between all possible models using AIC
+  
+  + *run model diagnostics* to determine that your model meets the assumptions of the distribution you've chosen
+ 
+3. Feel less intimidated by statistics in R! Specifically, remember: there are **multiple ways to approach statistics** and all of them are a little wrong, statistics is a tool to **bolster ecological questions**, and as long as you are **consistent** and **transparent** about your process (accessible data and code), you'll be fine.
+
+# A. Common Distributions 
+
+There are lots of different data distributions for LMs and GLMs for ecological data. The Zuur book has a great introduction to many of these and the [Kyle Edwards notes](https://sites.google.com/site/kyleedwardsresearch/lecture-notes?authuser=0) (Lectures 6-13) have great succinct explanations and worked examples. Many of these I don't actually use but there are a few that are really common in ecology which I use all the time. 
+
+You can find the model families for a given GLM-calling function in R by assessing the `family` object for that function. I usually get there by typing `?glm` or `?glmmTMB` and then selecting either the `family` or the `family_glmmTMB` links from those help pages when they pop up.
+
+Myself and a collaborator (Tatum Katz, PhD student at UCSB) compiled a list of common GLM families, what kinds of data you might fit with them, packages that have that model family, and where you might find more information on each of them in Kyle Edwards' notes, or on the interwebs. You can find complementary information on page 205 of the Zuur book or in Kyle Edwards' Lecture 11.
+
+```{r, echo = FALSE, warning = FALSE}
+distributions <- read.csv(here("data", "Distribution_table.csv"))
+
+distributions <- distributions %>%
+  rename("Common Ecological Data" = "Common.Ecological.Data")
+
+
+distributions %>%
+  dplyr::select(-Type.of.data) %>%
+  gt() %>%
+  tab_header(
+    title = md("GLM Distributions"),
+    subtitle = "Find your data type for model families, R packages, and resources!"
+  ) %>%
+  tab_source_note(md("You can find all the distributions in a package by exploring the `family` object in any `?glm*` call.")) %>%
+  tab_row_group(
+    group = "Data type: Binary or proportional",
+    rows = 1:3
+  ) %>%
+  tab_row_group(
+    group = "Data type: Count or abundance",
+    rows = 4:11
+  ) %>%
+  tab_row_group(
+    group = "Data type: Continuous",
+    rows = 12:14
+  ) %>%
+  row_group_order(
+    groups = c("Data type: Binary or proportional", "Data type: Count or abundance",
+               "Data type: Continuous") 
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold")
+    ),
+    locations = cells_column_labels(
+      columns = vars("Distribution", "Common Ecological Data", "Packages",
+                     "Resources")
+    )
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold", style = "italic")
+    ),
+    locations = cells_row_groups()
+    )
+
+
+
+```
+
+
+
+
+From the survey results, we have a mix of datasets that *could* be fit with a basic GLM (or extensions into mixed models), including 
+
+  + species occurrence and density across environmental gradients
+  
+  + comparing targeted chemical concentration data to cell response
+  
+  + survey data for economic impacts to water systems and a lot of additional metadata
+  
+  + Plastic count concentration on the surface of the ocean
+  
+  + Various water quality data
+  
+  + microplastics toxicity data - what microplastics characteristics contribute to toxicity and at what doses?
+  
+  + I have data looking at responses to microbes in relation to environmental parameters, both from environmental surveys and in experimental environments
+  
+  + abundance of species in multiple traps across seasonal and environmental gradients
+
+# B. GLMs in R 
+
+I'm going to go through a really common GLM in ecology (Poisson for count data) using continuous predictor variables. Keep in mind that any type of data can follow a variation of the same process, including data that might be best fit for a basic linear model, or a more complicated mixed model! This tutorial is really meant to walk through the basic steps in fitting a GLM in R. I provide a tabbed [extension](#extensions) at the end for different data types (categorical predictor variable (think: fancy ANOVA) and binomial distributions for presence-absence data) and solutions to common problems (negative binomial distributions for weird count data, and zero-inflated models for even weirder count data).
+
+## Why GLM and not a basic LM?
+
+```{r, echo = FALSE}
+knitr::include_graphics(here("figures", "not_normal.png"))
+```
+[Allison Horst is an R Goddess](https://github.com/allisonhorst/stats-illustrations)
+
+A lot of ecological data do not fit the basic assumptions of a linear model (specifically, normal data distributions).  
+
+Like a basic LM, GLMs do still have assumptions (e.g. no weird patterns in the residuals: "heteroskedasticity", and residuals and data that generally don't have a weird skew: "dispersion" and "zero-inflation").
+
+We'll be using a dataset on salamander abundances in streams that are either below mountaintop removal mining sites or in control (non-mined sites) to explore some GLM approaches. Let's see why these data might be better suited for a GLM than a regular LM by looking at the frequency distribution (histogram) of the response variable (`count`) values. For an LM, the assumption is that these are normally distributed (e.g. have a nice bell curve shape).
+
+```{r}
+library(glmmTMB)
+data(Salamanders)
+hist(Salamanders$count)
+```
+
+The above histogram demonstrates a distribution I see in just about any of my ecological datasets that involve counts. Specifically, the data are *not* normally distributed (and there are a lot of zeros). 
+
+Conversely, the `Sepal.Width` measurements in the `iris` dataset demonstrate a beautiful normally-distributed dataset that could be perfect for a basic linear model.
+
+```{r}
+data(iris)
+hist(iris$Sepal.Width)
+```
+
+## R Packages for GLMs
+
+```{r}
+library(MASS) #glm.nb for negative binomial models
+library(glmmTMB) #Salamanders dataset and lots of families
+library(lme4) #pseudo-R2 and and mixed model functionality
+library(MuMIn) #dredge function for comparing models, AIC, marginal R^2 for mixed models
+library(sjmisc) #pseudo R^2 - but I think gets loaded as a dependency
+library(DHARMa) #model diagnostics
+library(effects) #what do my marginal effects look like?
+library(performance) #binomial model diagnostics
+library(emmeans) #post hoc for categorical predictors
+```
+
+LMs, GLMs, and their extensions (e.g. mixed models) are used a TON in ecology and other fields so there are lots of R packages for regression, including some base packages and some more fancy ones. 
+
+**Model-making packages include:**
+
+`stats` (pre-loaded in R), `MASS` for the `glm.nb` function for negative binomial data, and `glmmTMB` of `lme4` for most GLM models and mixed models
+
+**Model-comparing packages include:**
+
+`MuMIn` is the primary package I use here, but I'm sure there are others!
+
+**Model-diagnostic packages include:**
+`DHARMa` for all the "do my data fit my model" questions, `performance` for "do my data fit my model" questions for binomial models, `effects` for looking at what the marginal effects are of the model (e.g. what is the relationship in my data?), and `emmeans` for models with categorical predictors (covered later)
+
+### Model-fitting packages
+
+[`stats`](https://stat.ethz.ch/R-manual/R-devel/library/stats/html/00Index.html)
+
+[`MASS`](https://cran.r-project.org/web/packages/MASS/index.html)
+
+[`glmmTMB`](https://cran.r-project.org/web/packages/glmmTMB/index.html)
+
+[`boot`](https://cran.r-project.org/web/packages/boot/index.html)
+
+[`lme4`](https://cran.r-project.org/web/packages/lme4/index.html)
+
+### Model-comparing packages
+
+[`MuMIn`](https://cran.r-project.org/web/packages/MuMIn/index.html)
+
+### Model diagnostics packages
+
+[`DHARMa`](https://cran.r-project.org/web/packages/DHARMa/index.html)
+
+[`performance`](https://cran.r-project.org/web/packages/performance/index.html)
+
+[`effects`](https://cran.r-project.org/web/packages/effects/index.html)
+
+[`emmeans`](https://cran.r-project.org/web/packages/emmeans/index.html)
+
+[`boot`](https://cran.r-project.org/web/packages/boot/index.html)
+
+## The GLM process
+
+The process of fitting a GLM includes an iterative process of steps:
+
+1. **Determine a model structure** based on experimental design (what is the effect of x (and potentially z, a, and b) on y (and potentially c and d)?)
+
+    + What is the effect of water temperature and elevation on the abundance of caddisfly larvae?
+  
+    + What is the effect of habitat patch size and productivity on the presence or absence of spiders?
+  
+2. Do some **model selection process** to figure out what is a best model, which just means something like:
+
+    + I have 1+ predictors (the x, z, a, and b above) and I want to know what combination of those predictors actually explain the patterns in my data without overfitting
+    
+
+3. **Do my data meet model assumptions**, and if not, how do I fix this? (most of my time in statistics is spent on this step)
+
+```{r, echo=FALSE}
+knitr::include_graphics(here("figures", "GLM_process.jpg"))
+```
+
+
+*Words of encouragement: I follow an approach I learned from the Zuur book when developing and fitting models to my data. Start a priori with a full model I want to test, some knowledge of the type of family it should fit (for counts, likely Poisson, negative binomial, or some derivative), and try to remember the ecological reasons for why I'm doing my statistics. Not only does this avoid finding significance just because I've thrown in everything and the kitchen sink, but it also helps me explain my statistics to myself and to others who might not be statisticians first. Once I dove in to model selecting, I realized that everyone on Stack Overflow has their own strong and differing opinions about the "right" way, which made me think there isn't a "right" way and it's more important to be able to justify what I did by being consistent and transparent with my process.*
+
+## Poisson GLM: Count data
+
+Now the part we've all been waiting for - let's fit one of these GLMs!
+
+We'll be using a dataset of salamander abundances from a paper on the effects of mountaintop removal on salamanders in streams ([Price et al. 2015](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/1365-2664.12585)). The dataset is in the glmmTMB package.
+
+```{r}
+data(Salamanders) #from glmmTMB
+```
+
+This dataset has 644 observations of 9 variables:
+
+```{r}
+str(Salamanders)
+```
+
+**site**: name of a location where repeated samples were taken
+
+**mined**: factor indicating whether the site was affected by mountain top removal coal mining
+
+**cover**: amount of cover objects in the stream (scaled)
+
+**sample**: repeated sample
+
+**DOP**: Days since precipitation (scaled)
+
+**Wtemp**: water temperature (scaled)
+
+**DOY**: day of year (scaled)
+
+**spp**: abbreviated species name, possibly also life stage
+
+**count**: number of salamanders observed
+
+### Going back to the three steps we need to fit a GLM to our data:
+
+1. What is our question (e.g. what is the effect of x on y?)
+
+2. What is the best model? (e.g. which variables explain patterns without going too far?)
+
+3. Do my data meet model assumptions, and how do I fix this if not?
+
+### 1. Poisson: What is the question?
+
+Let's say that this study was part of a project looking at how stream variables influenced salamander presence or abundance (we address [categorical predictors](#extensions) at the end and will revisit the mined vs. not mined question there and how to approach that with a GLM). Our question with a continuous predictor might be:
+
+  + What are the effects of cover and water temperature on salamander abundance?
+  
+```{r}
+Salamanders %>%
+  gather(-site, -mined, -sample, -DOP, -DOY, -spp, -count, key = "var", value = "value") %>%
+  ggplot(aes(x = value, y = count)) +
+  geom_point() +
+  geom_smooth(method = "lm", se =F) +
+  facet_wrap(~ var, scales = "free") +
+  theme_bw()
+```
+
+Based on this graph, *maybe* there is some positive influence of cover on salamander abundance and some negative influence of water temperature.
+
+The same way we fit an LM in the last session, we can call a GLM, but now using a GLM formula. Again, from above, we have abundance (count) data with a left-skewed distribution (not normal), so we will be starting with a Poisson distribution and tinkering with fixes on that model family (e.g. negative binomial).
+
+```{r}
+model <- glm(count ~ cover + Wtemp,
+    data = Salamanders,
+    family = "poisson")
+```
+
+We can look at the model summary, which looks really similar to the basic regression summary. 
+
+```{r}
+summary(model)
+```
+
+In this model summary, the factors I usually look at include `Estimate` for each predictor, which gives a directionality or intercept for that predictor, and the `Pr(>|z|)` value, which gives some p-value based significance for this predictor in the model. The `Estimate` value for `cover`, for example, says that there is a positive relationship of salamander abundance with the `cover` variable with a positive slope of 0.27085. Because this variable has a significant `Pr(>|z|)`, we can also gather that this is an important variable in this model. Ecologically, based on this model, maybe there is an effect of cover on salamander abundance. 
+
+### 2. Poisson: What is the "best" model 
+
+Kyle Edwards Lectures 15 & 16 are on [model selection](https://sites.google.com/site/kyleedwardsresearch/lecture-notes). I'm really not going to focus on the theory all that much here, and rather I'll focus on the practical application of model selection for linear models. 
+
+The goal of model selection is this: there is a perfect model that explains all the pattern and variation in your data, however, you will never know this perfect model and so, instead, you are aiming to find a model that best approximates this magical unicorn model. (Kyle Edwards goes into more detail).
+
+There are many ways to select models, but one that is really common in ecology is using AIC values (or corrected AICc for small sample sizes - which applies to most/all ecological datasets!) The AIC, or Akaike Information Criterion, AIC is a fancy equation
+
+$$AIC = -2 * log(L(\hat\theta|Y)) + 2K$$
+
+But is really quite simple to use in practice once you know what some of the parts of that equation means. The $log(L(\hat\theta|Y))$ section is the log likelihood of your parameters ($\hat\theta$) of your model given your data ($Y$). This value will *increase with a better-fitting model* (based on log likelihoods which is the basis of linear models and which I forget the theory of ALWAYS). The $2K$ part is a penalty for adding more parameters, where $K$ is the number of parameters in your model and will *increase as you add more predictors*. (for AICc for small sample sizes, there is an additional penalty for too many predictors). All this fancy math just to say:
+
+I'm trying to find the model with the **lowest AIC value** of all models, which means I've found that happy medium between fitting my data well (reward: $log(L(\hat\theta|Y))$) and not using too many parameters (penalty: $K$).
+
+You *can* use AIC values with non-nested models, meaning I could compare a model of `count ~ Wtemp` with a model of `count ~ cover`. However, one very important thing to keep in mind about AIC-based model comparisons is that **you can only compare models fit to the same dataset.** (In other words, I *could not* use AIC to compare a model of `count ~ Wtemp` from one stream with a model of `count ~ Wtemp` from another stream).
+
+So, let's fit an AIC to our model and then extend that to compare it to other models!
+
+The basic `summary()` function for models prints an AIC value for that model, however, this value is not necessarily the value we should be using here (we should use AICc most of the time, as I mentioned before for small datasets). (Furthermore, and not to go into too much detail here, but for mixed models, you'll want to do all the model selection steps with a different maximum likelihood estimator, set by putting a `REML=FALSE` argument into your model. [info here](http://users.stat.umn.edu/~gary/classes/5303/handouts/REML.pdf)).
+
+
+```{r}
+summary(model)
+
+AICc(model)
+```
+
+For this model, the AIC value from the `summary()` function and the AIC value from the `AICc()` function look fairly similar - however, AICc is a better approach and will often give different values for small datasets, especially as you increase the number of predictors (AICc adds an additional penalty based on the number of predictor variables). 
+
+Now lets compare this model to all models with any combination of the predictors in this model, which is really saying: 
+While I expect that x and z could predict y, it could be that one explains more of the variation in the data and that the other adds so little to that variation that the parameter number "penalty" part of the AIC equation ($2K$) is outweighing the parameter number "reward" ($log(L(\hat\theta|Y))$).
+
+The `AICc()` function comes from the `MuMIn` package, as does the next function: `dredge()`, which we will be using. However, to use `dredge()` without possibly getting an error for the model producing different NA values for each model (`dredge()` won't work to compare different datasets), we have to first add an NA action to the model, and then run `dredge()`.
+
+```{r}
+model <- glm(count ~ cover + Wtemp,
+    data = Salamanders,
+    family = "poisson",
+    na.action = "na.fail")
+```
+
+
+```{r}
+dredge(model)
+```
+
+Now we have a bunch of AICc values to compare, along with a "delta" value for each, which is just the difference between that model and the "best" model of the list. A rule of thumb: **delta = 2** is a good cutoff for choosing between two models (AIC is on the log scale, so anything with an AIC value of 2 difference is 2 orders of magnitude, or 100 times different). In this case, our top two models are within 2 AICc values of each other - which happens quite often. In this case, I usually go for the **more simple model** of the two, which in this case is the model with just `cover` as a predictor of `count`. (I got this approach from Zuur, but could be good to read up on it on your own. You can also report both, and use `emmeans()` or other functions to determine marginal significance/p-values down the line). In general, choosing the top model from all of these models is also a totally appropriate approach, even if the next model is "close" in AIC values (see what I mean about the "lots of approaches to stats"?)
+
+### 3. Poisson: Do my data fit the model assumptions?
+
+Now that we have our model that we want to report in our paper, we need some way to say whether our data actually meet the assumptions of this model. You can approach these in a similar way to basic LM model tests (looking at heteroskedasticity of residuals using residual or Q-Q plots), but there are several extensions here (dispersion and zero-inflation) AND some reasons as you get to more complicated models (e.g. mixed models) as to why you might want something that gives you some confidence interval (e.g. p-value) to whether your visual assessments of your data warrant revisiting your model.
+
+I use the `DHARMa` package for this in all my linear models (mixed and non-mixed). `DHARMa` simulates a bunch of sets of residuals from each observations based on the fitted model, including the probability of those values given the data. The outputs are AWESOME diagnostics that look really similar to the qqplots and residual plots from basic model diagnostics, except now with some confidence that the data fit model assumptions tacked on (and the ability to determine overdispersion and zero-inflation for count data).
+
+This is a very simplified explanation of the `DHARMa` package, but they have a great [tutorial](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html) with more in-depth explanations and lots more functions from the package. 
+
+First, we'll simulate our batches of residuals based on our best-fitting model, which you'll recall had just `cover` as a predictor:
+
+```{r}
+best_model <- glm(count ~ cover,
+    data = Salamanders,
+    family = "poisson")
+
+simulationOutput <- simulateResiduals(fittedModel = best_model, plot = T)
+```
+
+YIKES. We've got some issues with model assumptions. This shape for a qqplot is definitely evidence of some potential overdispersion, but we can test that explicitly in the `DHARMa` package using the `testDispersion()` function.
+
+```{r}
+testDispersion(simulationOutput)
+```
+
+The `testDispersion()` function gives us a histogram of simulated *expected* values, and then a red line indicating our *observed* dispersion in our actual data. Additionally, this function performs a statistical test of our dispersion with the null hypothesis being "We do not have overdispersion". Our very low p-value indicates that our dispersion value is not very likely to come from the distribution of expected dispersion values for our model. Simply: **we have overdispersion**.
+
+### Poisson: Common fixes for models that don't meet assumptions
+
+Overdispersion is a really common problem for count data and the good news is that there are some pretty easy fixes. *(A place where opinions on the order in which you apply fixes deviates, but I'll show you mine. Kyle Edwards and the Zuur book both have great workflows for this, which I based mine off as well. You can also find my [flowchart for model selection](#flowchart) in the Extensions tab)*.
+
+The fixes used can depend on your data and what your model looks like in the first place. There are some simple math-related reasons based on model distributions for why overdispersion could be occurring and there are also some more practical reasons based on the variables we put into (or didn't put into) the model. 
+
+1. Did I include all the relevant variables?
+
+    + Are there other fixed effects that may be needed in my model?
+    
+    + (Not covered today, and maybe a problem with this dataset: is there a need for grouping variables to account for non-independent samples (random effects and mixed models)?)
+
+2. Do my data actually fit a Poisson distribution? (lots of opinions and approaches to address this point)
+
+    + My approach: 1) refit with a negative binomial model, 2) add a zero-inflation term, 3) think about data transformations. (some other useful overdispersion tips, specifically for GLMMs, but useful for GLMs too, on [Ben Bolker's GLMM FAQ page](https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html))
+
+## What to report in a paper?
+
+Let's say that `best_model` is actually the best model for these data and meets assumptions (which it doesn't in this case...). I will want to report some statistics on this, right? For basic GLMs you can report the $\beta$ (`Estimate`) for the model as well as the $p-value$ (`Pr(>|z|)`) for the predictors, which basically gives you 
+
+$\beta$: the slope and direction (+ or -) of the relationship between the x and y components (or, for categorical variables, the by-category intercept)
+
+$p-value$: relative importance of the predictor
+
+You can get both of these from the `summary()` function, where $\beta$ comes from the value under `Estimate` for each predictor and the $p-value$ comes from the `Pr(>|z|)` for each predictor. 
+
+```{r}
+summary(best_model)
+```
+
+For a linear relationship like this one, you might also want to know the $R^2$ value for your relationship, which is a measure of how close your points would be to a linear line (ranges 0 - 1, with a better relationship closer to 1). For GLM's this is called a pseudo-$R^2$ and can be run in the `sjmisc` package using the `r2()` function:
+
+```{r}
+r2(best_model)
+```
+
+In your final paper, your model selection methods could sound like:
+
+**Methods:**
+We wanted to know which stream abiotic conditions influenced salamander abundance. To do this, we fit generalized linear models with a poisson distribution (for count data) with two important stream attributes, water temperature and woody debris cover as predictors and salamander count as a dependent variable. We performed model selection using AICc and ensured that models fit assumptions using model diagnostics. We ran all statistical analysis in R (Cite with version) using the [package for glm]. We selected models using AICc with the MuMIn package and performed all model diagnostics in DHARMa (CITE packages).
+
+**Results:**
+The best fitting model for salamander abundance included woody debris cover as a predictor variable ($\beta$ = 0.278, p-value < 0.001, $R^2$ = 0.1). There were on average x%/Xx/[some human-friendly value] more salamanders in a stream with 50% woody debris cover as one with no debris cover. 
+
+## Extensions {#extensions}
+
+I don't have time to go over these, but these are some common data types and issues I have and from survey responses, maybe you will have these types of data and challenges too. Specifically:
+
+1. Categorical predictor variables (an extension of ANOVA)
+
+2. Presence-absence data (binomial distributions)
+
+3. Overdispersed count data (negative binomial distribution)
+
+4. Count data with too many zeros (Zero-inflated model)
+
+# {.tabset}
+
+## Categorical predictor
+
+```{r, echo = FALSE}
+knitr::include_graphics(here("figures", "continuous_discrete.png"))
+```
+[Allison Horst is a Stats Wizard](https://github.com/allisonhorst/stats-illustrations)
+
+GLMs can sometimes look suspiciously like an ANOVA, which isn't surprising and makes GLMs really versatile!
+
+Let's revisit the example of the salamanders in streams that either were or weren't below mountaintop removal sites. In this example, if we want to know whether mining has an effect on salamander abundance, we are dealing with a categorical fixed effect (mined vs. unmined). We can approach this really similarly to any other GLM and can also get diagnostics that look suspiciously similar to ANOVA diagnostics. Let's do it:
+
+### Categorical fixed effect, count response: what is the question? 
+
+Again, we have count data, so we're going to be playing with Poisson or negative binomial models with this one. Our question is now **What is the effect of presence of mountaintop mining on the abundance of salamanders in streams?"**
+
+In this situation, it might be more intuitive to look at our data as a boxplot:
+
+```{r}
+ggplot(Salamanders, aes(x = mined, y = count)) +
+  geom_boxplot() +
+  theme_bw()
+```
+
+But we could also coerce our yes/no predictor into a continuous-type variable and visualize it as a line graph, setting the "no" level to "1", and the "yes" level to "2". 
+
+```{r}
+Salamanders %>%
+  mutate(mine_line = ifelse(mined == "no", 1, 2)) %>%
+           ggplot(aes(x = mine_line, y = count)) +
+           geom_point() +
+           geom_smooth(method = "lm", se = FALSE) +
+           theme_bw()
+```
+In both of these graphs, it looks like mining may have a positive effect on salamander abundance. 
+
+In our model, the fixed effect will be `mined` (a binary yes/no) and our response will be `count` from the `Salamanders` dataset:
+
+```{r}
+cat_poisson <- glm(count ~ mined, 
+                   data = Salamanders,
+                   family = "poisson")
+```
+
+We can look at our model summary again to see that the effect of mining does seem to be important for salamander abundance.
+
+```{r}
+summary(cat_poisson)
+```
+
+### Categorical fixed effect, count response: what is the "best" model?
+
+Skipping (but maybe try it on your own?)
+
+### Categorical fixed effect, count response: do data meet assumptions?
+
+This probably seems repetitive by now - but we can also use `DHARMa` for this kind of model.
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = cat_poisson, plot = T)
+```
+
+This model also has so many of the beautiful model assumption failures. 
+
+```{r}
+testDispersion(simulationOutput)
+```
+
+A new one (meaning: we have too many zeros to fit this distribution with our data): 
+
+```{r}
+testZeroInflation(simulationOutput)
+```
+
+So we could approach it like we've been approaching any other model when it comes to fixing this!
+
+**On your own**: How would you attempt to fix some of these model assumption failures?
+
+#### Catagorical fixed effect wrap-up: post-hoc and visualizations
+
+In this example, our predictor had two categories, and so we can report model results (including the p-value) for the between-group differences (ala ANOVA) from the `summary()` for the model. However, if you had a categorical variables with more than two levels, there are some cool ways to do pair-wise comparisons between those levels (for example, if I had "full mountaintop removal", "partial mountaintop removal", and "no mountaintop removal" mining categories for the Salamander dataset). 
+
+Again, at this point I always like to do a quick visual of my data, which I can still do with the `allEffects` call:
+
+```{r}
+plot(allEffects(cat_poisson))
+```
+
+If I had more than two levels for my predictor, I could use the `emmeans` package and function to determine the pair-wise differences between groups. 
+
+```{r}
+em <- emmeans(cat_poisson, "mined")
+```
+
+The `emmeans()` function calculates the marginal means (mean of a group given all the other groupings in the model) based on a specified predictor (here, "mined"): 
+
+```{r}
+em
+```
+
+and then you can compare these means to each other:
+
+```{r}
+pairs(em)
+```
+
+I've also played around a bit with the `ggeffects` package, which produces similar values in a ggplot-friendly format. I don't cover it here, but you can always use that to graph marginal means from models. `ggeffects` is also useful for plotting marginal means of different levels of a random effect for a mixed model!
+
+[ggeffects](https://strengejacke.github.io/ggeffects/)
+
+## Presence-absence data (binomial)
+
+```{r, echo = FALSE}
+knitr::include_graphics(here("figures", "nominal_ordinal_binary.png"))
+```
+[Allison Horst](https://github.com/allisonhorst/stats-illustrations)
+
+Let's say we were actually interested in just whether we find salamanders or not, not their actual abundances in each stream. This means we have a binary response of presence-absence and want to know whether presence is predicted by cover or water temperature. We can convert the count data to a binary variable of `presence`:
+
+```{r}
+Salamanders <- Salamanders %>%
+  mutate(presence = ifelse(count > 0, 1, 0))
+```
+
+And then look at whether our two predictors (stream cover and water temperature) predict presence. 
+
+```{r}
+Salamanders %>%
+  gather(-site, -mined, -sample, -DOP, -DOY, -spp, -count, -presence, key = "var", value = "value") %>%
+  ggplot(aes(x = value, y = presence)) +
+  geom_point() +
+  geom_smooth(method = "lm", se =F) +
+  facet_wrap(~ var, scales = "free") +
+  theme_bw()
+```
+
+This is kind of a hard graph to visualize because of the binary response variable, but visually it does look like there might be more 1's as cover increases and maybe more zeros as water temperature increases. 
+
+### 1. Binomial: What is the question
+
+Our question here is really similar to the question above, except now we want to know whether stream cover and water temperature predict the *presence* of salamanders, rather than their abundance. Now that we have a binary presence-absence response variable, we will be using the binomial distribution to fit our data. You can run a binomial model by just changing the `family =` argument in the `glm()` function. 
+
+```{r}
+bi.model <- glm(presence ~ cover + Wtemp,
+                data = Salamanders,
+                family = binomial)
+```
+
+Our model summary is really similar to before and suggests some evidence that stream cover is, indeed, predictive of whether we see salamanders in streams or not. 
+
+```{r}
+summary(bi.model)
+```
+
+### 2. Binomial: What is the "best" model (Next week!) 
+
+Again skipping this step for now!
+
+### 3. Binomial: Does my data fit the model assumptions
+
+With this model, we can again use `DHARMa` to test model assumptions and we can also use the `binned_residuals()` function in the `performance` package, which is specifically designed for binomial distributions.
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = bi.model, plot = T)
+```
+
+
+According to this, this model actually performs pretty well. 
+
+The residuals for a binomial model always look pretty funky:
+
+```{r}
+plot(residuals(bi.model))
+```
+
+So we can use the   `binned_residuals` function to tell how well our model is doing, which is... ok, but not great.
+
+From the vignette for the `performance` package: "Binned residual plots are achieved by “dividing the data into categories (bins) based on their fitted values, and then plotting the average residual versus the average fitted value for each bin.” (Gelman,Hill 2007: 97). If the model were true, one would expect about 95% of the residuals to fall inside
+the error bounds."
+
+```{r}
+binned_residuals(bi.model)
+```
+
+Based on these residuals, our data is *ok*, but not great at fitting model assumptions (95% of residuals). Again, this could be because of the practical or math reasons outlined above from the Poisson and negative binomial models:
+
+1. Did I include the right variables in my model?
+
+    + Are there other fixed effects that may be needed in my model?
+    
+    + (Not covered today, and maybe a problem with this dataset: is there a need for grouping variables (random effects and mixed models)?)
+
+2. Do my data actually fit a binomial distribution? 
+
+    + variable transformations or quasi-binomial distribution
+    
+### Presence data wrap-up: a quick visualization
+
+We can do another quick diagnostic visualization to ground ourselves here as well!
+
+```{r}
+plot(allEffects(bi.model))
+```
+
+
+## Negative binomial: count data with overdispersion
+
+Our model of salamander abundance with cover and water temperature did not meet model assumptions, possibly because this dataset is really common to many count datasets in that the data are overdispersed and might need a data distribution that can account for that. Negative binomial models are a type of model that can be fit to count data that account for this data distribution. Let's start by refitting our data to a negative binomial distribution, which we can do with the `glm.nb` function from the `MASS` package. 
+
+This means we're returning to Step 1 via Step 4A in our GLM process flowchart:
+
+```{r, echo =FALSE}
+knitr::include_graphics(here("figures", "GLM_process.jpg"))
+```
+
+### 1. NB: What is the question?
+
+In this case, the ecological question stays the same, we're just using a different model family to better account for model assumptions. 
+
+```{r}
+nb.model <- glm.nb(count ~ cover + Wtemp,
+                   data = Salamanders)
+```
+
+Looking at the summary of this model, it looks like cover is still important, but the model coefficients have changed. 
+
+```{r}
+summary(nb.model)
+```
+
+(Just as a reminder, the summary for the Poisson model): 
+
+```{r}
+summary(model)
+```
+
+### 2. NB: What is the "best" model (Next week!) 
+
+Again, let's say we went through the step 2 model selection process and this came out as the best model.
+
+### 3. NB: Do my data fit the model assumptions?
+
+Let's see how the model and data do in terms of model assumptions: 
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = nb.model, plot = T)
+```
+
+It looks like we've fixed the overdispersion problem, but may still have some issues with this dataset based on the residuals plot. Let's look at the dispersion problem specifically:
+
+```{r}
+testDispersion(simulationOutput)
+```
+
+We have fixed the overdispersion! However, based on the output from this model, it still looks like we have some patterns in our residuals. I'm not surprised about this, given that it's an example dataset in a mixed model package and so likely we are having more of a practical problem with missing effects in this model. (Maybe once we learn mixed models we can revisit?)
+
+### Count data wrap-up: a quick visualization
+
+I'm a visual person, so at this point I always want to know what my model is actually telling me ecologically (e.g. what is the effect of cover??). I do quick diagnostics using the `effects` package and the `allEffects` function. This is just a line graph showing the marginal change in count for this model given a change in each of the predictors, while accounting for everything else in the model. You can get similar and more complex marginal effects plots with the `ggeffects` package, but I haven't played with it much. I wouldn't put this into my final paper, but it helps me to stay grounded in the ecology when I get lost in the R and statistics world.
+
+```{r}
+plot(allEffects(nb.model))
+```
+
+
+## Zero-inflated models for count data
+
+
+As you may know from your own datasets, ecological data of counts often have a lot of zeros. Sometimes, these datasets have so many zeros that neither Poisson or negative binomial models will work. There are a set of models called "Zero-inflated" models (can be either Poisson or negative binomial), which are basically that - models that can fit data that have an "inflated" number of zeros. There are tons of resources on this, and I won't cover it all here, just providing a practical worked example. (there are also two types of zero-inflated models that I won't go into, but have to do with where the zeros are coming from, not going to try to have an exhaustive example here, but look into it if this is a problem for you!)
+
+**Zuur chapter 11 is a go-to resource to get started!**
+
+[Another set of worked examples](https://fukamilab.github.io/BIO202/04-C-zero-data.html#key_points)
+
+[Books](https://highstat.com/index.php/beginner-s-guide-to-zero-inflated-models)
+
+[More books](https://highstat.com/index.php/zero-inflated-models-and-generalized-linear-mixed-models-with-r)
+
+[GOOGLE](https://www.google.com/search?sxsrf=ALeKk00BAogDZPbJ5yHQg810CFuTJ3HEgA%3A1595002818410&ei=ws8RX83OGMe0tAaxl474Aw&q=zero+inflated+models+ecology&oq=zero+inflated+models+ecology&gs_lcp=CgZwc3ktYWIQAzIFCAAQzQIyBQgAEM0CMgUIABDNAjIFCAAQzQIyBQgAEM0COgQIABBDOgYIABAHEB46BwgAEBQQhwI6AggAOgYIABAWEB46CAgAEBYQChAeOgUIIRCgAToHCCEQChCgAVDpJVjlNGC1NmgAcAB4AIAB3AGIAbsIkgEFMi42LjGYAQCgAQGqAQdnd3Mtd2l6&sclient=psy-ab&ved=0ahUKEwjNt6DD2NTqAhVHGs0KHbGLAz8Q4dUDCAw&uact=5)
+
+Let's play with a different dataset from the lme4 package on the number of ticks observed in grouse chicks in nests in different years, elevations, and locations. 
+
+```{r}
+data(grouseticks)
+str(grouseticks)
+```
+
+**INDEX**: (factor) chick number (observation level)
+
+**TICKS**: number of ticks sampled
+
+**BROOD**: (factor) brood number
+
+**HEIGHT**: height above sea level (meters)
+
+**YEAR**: year (-1900)
+
+**LOCATION**: (factor) geographic location code
+
+**cHEIGHT**: centered height, derived from HEIGHT
+
+### 1. Zero-inflated count data: What is the question?
+
+Let's say our question was whether elevation has an effect on tick abundance in grouse chicks, maybe because lower elevation sites have a larger temperature window of tick activity.
+
+```{r}
+ggplot(grouseticks, aes(x = HEIGHT, y = TICKS)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  theme_bw()
+```
+It does look like there is some effect of elevation on tick abundance, and it *does* seem to be negative (e.g. higher elevation = lower tick abundance).
+
+Like the previous dataset on salamanders, there are a lot of zeros in this dataset
+
+```{r}
+hist(grouseticks$TICKS)
+```
+
+```{r}
+grouseticks %>%
+  filter(TICKS == 0) %>%
+  summarise(count = n(), total = 403, proportion = count/403)
+```
+
+Out of 403 observations, 126 observations are zeros (31%). That's a lot! 
+
+Again, we will start with fitting a normal Poisson model: 
+
+```{r}
+ticks_poisson <- glm(TICKS ~ HEIGHT,
+                   data = grouseticks,
+                   family = "poisson")
+```
+
+### 2. Zero-inflated count data: What is the "best" model? (Skipping again)
+
+If this was our best model (skipping step 2 again), we can assess the residuals: 
+
+### 3. Zero-inflated count data: Does my data fit the model assumptions?
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = ticks_poisson, plot = T)
+```
+
+And test for overdispersion again:
+
+```{r}
+testDispersion(ticks_poisson)
+```
+
+Again, we have overdispersion. If it was me, I would start by trying to fit a negative binomial model (as before). Even with this number of zeros, often re-fitting with a negative binomial model will fix a lot of issues with zeros. However, for the sake of learning, let's say that we can't fit a negative binomial model to these data, or that it doesn't fit our zero inflation problems. 
+
+**How do we determine we have zero inflation issues, you ask?** The `DHARMa` package has another useful function called `testZeroInflation()` that I always throw into my model diagnostics for count data.
+
+```{r}
+testZeroInflation(ticks_poisson)
+```
+
+This output operates a lot like the `testDispersion()` function output. Again, `DHARMa` has created some simulated expected values for our model, and we see that our distribution has way more zeros than would be predicted by a simulated data distribution based on our model. 
+
+### 1.a. Zero-inflated count data: What is the question?
+
+
+Again, we have the same question, we just need to fit a different model family that incorporates zero inflation. There are several packages that will let you fit a zero-inflated model (`pscl`, `glmmTMB`, `ZIM`). You can find a tutorial based on `pscl` at [this website](https://fukamilab.github.io/BIO202/04-C-zero-data.html#key_points). I use `glmmTMB` because it has a lot of flexibility and lets me extend to mixed models really easily. It is an actively-developing package that many of the pre-eminent mixed model people in ecology swear by. 
+
+In `glmmTMB`, the function to call a glm is `glmmTMB()` and we can add a zero-inflation term with an added argument (`ziformula = 1`). There are more complicated ways to call a zero-inflated formula, but this is the basic one.([more here](https://cran.r-project.org/web/packages/glmmTMB/vignettes/glmmTMB.pdf))
+
+Referring again to our flowchart for GLMs, we're doing Step 1 via Step 4A again, except this time we're going to fit a zero-inflated model rather than a negative binomial model to see if we can fix our model assumption problems:
+
+```{r, echo = FALSE}
+knitr::include_graphics(here("figures", "GLM_process.jpg"))
+```
+
+```{r}
+ticks_zi <- glmmTMB(TICKS ~ HEIGHT,
+                   data = grouseticks,
+                   ziformula = ~1,
+                   family = "poisson")
+```
+
+
+### 2.a. Zero-inflated count data: What is the "best" model?
+
+Skip!
+
+### 3.a. Zero-inflated count data: Do my data meet model assumptions?
+
+Repeating our diagnostics:
+
+```{r}
+simulationOutput <- simulateResiduals(fittedModel = ticks_zi, plot = T)
+```
+
+This is **NOT** a good model fit! But, let's see if we fixed the zero-inflation by including a zero inflation term in our model:
+
+```{r}
+testZeroInflation(ticks_zi)
+```
+
+Yes we have! However, we still need to consider all the math and practical reasons why this model isn't good (do we need to add variables, do we need a different distribution, do we need to transform?).
+
+### Flowchart for GLM and GLMM model selection for count data {#flowchart}
+
+Here's a flow chart of my complete model selection process and troubleshooting for count data (for GLMM, but can easily be used for GLM as well)
+
+```{r, echo = FALSE}
+knitr::include_graphics(here("figures", "model-selection.jpg"))
+```
