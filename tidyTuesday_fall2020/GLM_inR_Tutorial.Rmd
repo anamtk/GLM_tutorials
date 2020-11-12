@@ -5,7 +5,7 @@ date: "11/10/20"
 output: 
   html_document:
     toc: true
-    toc_depth: 4
+    toc_depth: 2
     toc_float:
       collapsed: false
     theme: readable
@@ -458,6 +458,8 @@ We wanted to know which stream abiotic conditions influenced salamander abundanc
 **Results:**
 The best fitting model for salamander abundance included woody debris cover as a predictor variable ($\beta$ = 0.278, p-value < 0.001, $R^2$ = 0.1). There were on average x%/Xx/[some human-friendly value] more salamanders in a stream with 50% woody debris cover as one with no debris cover. 
 
+## {#top}
+
 ## Extensions {#extensions}
 
 I don't have time to go over these, but these are some common data types and issues I have and from survey responses, maybe you will have these types of data and challenges too. Specifically:
@@ -470,9 +472,9 @@ I don't have time to go over these, but these are some common data types and iss
 
 4. Count data with too many zeros (Zero-inflated model)
 
-# {.tabset}
+## {.tabset}
 
-## Categorical predictor
+### Categorical predictor
 
 ```{r, echo = FALSE}
 knitr::include_graphics(here("figures", "continuous_discrete.png"))
@@ -483,7 +485,7 @@ GLMs can sometimes look suspiciously like an ANOVA, which isn't surprising and m
 
 Let's revisit the example of the salamanders in streams that either were or weren't below mountaintop removal sites. In this example, if we want to know whether mining has an effect on salamander abundance, we are dealing with a categorical fixed effect (mined vs. unmined). We can approach this really similarly to any other GLM and can also get diagnostics that look suspiciously similar to ANOVA diagnostics. Let's do it:
 
-### Categorical fixed effect, count response: what is the question? 
+#### Categorical fixed effect, count response: what is the question? 
 
 Again, we have count data, so we're going to be playing with Poisson or negative binomial models with this one. Our question is now **What is the effect of presence of mountaintop mining on the abundance of salamanders in streams?"**
 
@@ -521,11 +523,11 @@ We can look at our model summary again to see that the effect of mining does see
 summary(cat_poisson)
 ```
 
-### Categorical fixed effect, count response: what is the "best" model?
+#### Categorical fixed effect, count response: what is the "best" model?
 
 Skipping (but maybe try it on your own?)
 
-### Categorical fixed effect, count response: do data meet assumptions?
+#### Categorical fixed effect, count response: do data meet assumptions?
 
 This probably seems repetitive by now - but we can also use `DHARMa` for this kind of model.
 
@@ -581,7 +583,9 @@ I've also played around a bit with the `ggeffects` package, which produces simil
 
 [ggeffects](https://strengejacke.github.io/ggeffects/)
 
-## Presence-absence data (binomial)
+[**Back to Extensions**](#top)
+
+### Presence-absence data (binomial)
 
 ```{r, echo = FALSE}
 knitr::include_graphics(here("figures", "nominal_ordinal_binary.png"))
@@ -609,7 +613,7 @@ Salamanders %>%
 
 This is kind of a hard graph to visualize because of the binary response variable, but visually it does look like there might be more 1's as cover increases and maybe more zeros as water temperature increases. 
 
-### 1. Binomial: What is the question
+#### 1. Binomial: What is the question
 
 Our question here is really similar to the question above, except now we want to know whether stream cover and water temperature predict the *presence* of salamanders, rather than their abundance. Now that we have a binary presence-absence response variable, we will be using the binomial distribution to fit our data. You can run a binomial model by just changing the `family =` argument in the `glm()` function. 
 
@@ -625,11 +629,11 @@ Our model summary is really similar to before and suggests some evidence that st
 summary(bi.model)
 ```
 
-### 2. Binomial: What is the "best" model (Next week!) 
+#### 2. Binomial: What is the "best" model (Next week!) 
 
 Again skipping this step for now!
 
-### 3. Binomial: Does my data fit the model assumptions
+#### 3. Binomial: Does my data fit the model assumptions
 
 With this model, we can again use `DHARMa` to test model assumptions and we can also use the `binned_residuals()` function in the `performance` package, which is specifically designed for binomial distributions.
 
@@ -667,7 +671,7 @@ Based on these residuals, our data is *ok*, but not great at fitting model assum
 
     + variable transformations or quasi-binomial distribution
     
-### Presence data wrap-up: a quick visualization
+#### Presence data wrap-up: a quick visualization
 
 We can do another quick diagnostic visualization to ground ourselves here as well!
 
@@ -676,7 +680,9 @@ plot(allEffects(bi.model))
 ```
 
 
-## Negative binomial: count data with overdispersion
+[**Back to Extensions**](#top)
+
+### Negative binomial: count data with overdispersion
 
 Our model of salamander abundance with cover and water temperature did not meet model assumptions, possibly because this dataset is really common to many count datasets in that the data are overdispersed and might need a data distribution that can account for that. Negative binomial models are a type of model that can be fit to count data that account for this data distribution. Let's start by refitting our data to a negative binomial distribution, which we can do with the `glm.nb` function from the `MASS` package. 
 
@@ -686,7 +692,7 @@ This means we're returning to Step 1 via Step 4A in our GLM process flowchart:
 knitr::include_graphics(here("figures", "GLM_process.jpg"))
 ```
 
-### 1. NB: What is the question?
+#### 1. NB: What is the question?
 
 In this case, the ecological question stays the same, we're just using a different model family to better account for model assumptions. 
 
@@ -707,11 +713,11 @@ summary(nb.model)
 summary(model)
 ```
 
-### 2. NB: What is the "best" model (Next week!) 
+#### 2. NB: What is the "best" model (Next week!) 
 
 Again, let's say we went through the step 2 model selection process and this came out as the best model.
 
-### 3. NB: Do my data fit the model assumptions?
+#### 3. NB: Do my data fit the model assumptions?
 
 Let's see how the model and data do in terms of model assumptions: 
 
@@ -727,7 +733,7 @@ testDispersion(simulationOutput)
 
 We have fixed the overdispersion! However, based on the output from this model, it still looks like we have some patterns in our residuals. I'm not surprised about this, given that it's an example dataset in a mixed model package and so likely we are having more of a practical problem with missing effects in this model. (Maybe once we learn mixed models we can revisit?)
 
-### Count data wrap-up: a quick visualization
+#### Count data wrap-up: a quick visualization
 
 I'm a visual person, so at this point I always want to know what my model is actually telling me ecologically (e.g. what is the effect of cover??). I do quick diagnostics using the `effects` package and the `allEffects` function. This is just a line graph showing the marginal change in count for this model given a change in each of the predictors, while accounting for everything else in the model. You can get similar and more complex marginal effects plots with the `ggeffects` package, but I haven't played with it much. I wouldn't put this into my final paper, but it helps me to stay grounded in the ecology when I get lost in the R and statistics world.
 
@@ -735,8 +741,9 @@ I'm a visual person, so at this point I always want to know what my model is act
 plot(allEffects(nb.model))
 ```
 
+[**Back to Extensions**](#top)
 
-## Zero-inflated models for count data
+### Zero-inflated models for count data
 
 
 As you may know from your own datasets, ecological data of counts often have a lot of zeros. Sometimes, these datasets have so many zeros that neither Poisson or negative binomial models will work. There are a set of models called "Zero-inflated" models (can be either Poisson or negative binomial), which are basically that - models that can fit data that have an "inflated" number of zeros. There are tons of resources on this, and I won't cover it all here, just providing a practical worked example. (there are also two types of zero-inflated models that I won't go into, but have to do with where the zeros are coming from, not going to try to have an exhaustive example here, but look into it if this is a problem for you!)
@@ -772,7 +779,7 @@ str(grouseticks)
 
 **cHEIGHT**: centered height, derived from HEIGHT
 
-### 1. Zero-inflated count data: What is the question?
+#### 1. Zero-inflated count data: What is the question?
 
 Let's say our question was whether elevation has an effect on tick abundance in grouse chicks, maybe because lower elevation sites have a larger temperature window of tick activity.
 
@@ -806,11 +813,11 @@ ticks_poisson <- glm(TICKS ~ HEIGHT,
                    family = "poisson")
 ```
 
-### 2. Zero-inflated count data: What is the "best" model? (Skipping again)
+#### 2. Zero-inflated count data: What is the "best" model? (Skipping again)
 
 If this was our best model (skipping step 2 again), we can assess the residuals: 
 
-### 3. Zero-inflated count data: Does my data fit the model assumptions?
+#### 3. Zero-inflated count data: Does my data fit the model assumptions?
 
 ```{r}
 simulationOutput <- simulateResiduals(fittedModel = ticks_poisson, plot = T)
@@ -832,7 +839,7 @@ testZeroInflation(ticks_poisson)
 
 This output operates a lot like the `testDispersion()` function output. Again, `DHARMa` has created some simulated expected values for our model, and we see that our distribution has way more zeros than would be predicted by a simulated data distribution based on our model. 
 
-### 1.a. Zero-inflated count data: What is the question?
+#### 1.a. Zero-inflated count data: What is the question?
 
 
 Again, we have the same question, we just need to fit a different model family that incorporates zero inflation. There are several packages that will let you fit a zero-inflated model (`pscl`, `glmmTMB`, `ZIM`). You can find a tutorial based on `pscl` at [this website](https://fukamilab.github.io/BIO202/04-C-zero-data.html#key_points). I use `glmmTMB` because it has a lot of flexibility and lets me extend to mixed models really easily. It is an actively-developing package that many of the pre-eminent mixed model people in ecology swear by. 
@@ -853,11 +860,11 @@ ticks_zi <- glmmTMB(TICKS ~ HEIGHT,
 ```
 
 
-### 2.a. Zero-inflated count data: What is the "best" model?
+#### 2.a. Zero-inflated count data: What is the "best" model?
 
 Skip!
 
-### 3.a. Zero-inflated count data: Do my data meet model assumptions?
+#### 3.a. Zero-inflated count data: Do my data meet model assumptions?
 
 Repeating our diagnostics:
 
@@ -873,10 +880,13 @@ testZeroInflation(ticks_zi)
 
 Yes we have! However, we still need to consider all the math and practical reasons why this model isn't good (do we need to add variables, do we need a different distribution, do we need to transform?).
 
-### Flowchart for GLM and GLMM model selection for count data {#flowchart}
+#### Flowchart for GLM and GLMM model selection for count data {#flowchart}
 
 Here's a flow chart of my complete model selection process and troubleshooting for count data (for GLMM, but can easily be used for GLM as well)
 
 ```{r, echo = FALSE}
 knitr::include_graphics(here("figures", "model-selection.jpg"))
 ```
+
+
+[**Back to Extensions**](#top)
