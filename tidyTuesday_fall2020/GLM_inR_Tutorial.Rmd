@@ -1,7 +1,7 @@
 ---
 title: "GLM in R Tutorial"
 author: "Ana Miller-ter Kuile"
-date: "11/10/20"
+date: "4/29/21"
 output: 
   html_document:
     toc: true
@@ -342,6 +342,12 @@ In this model summary, the factors I usually look at include `Estimate` for each
 
 ### 2. Poisson: What is the "best" model 
 
+#### Note: what is the aim of your statistical approach?
+
+*There's  a great recent (2021) paper on being very specific about what the aim of your statistical approach is, and thus, how this model selection process should look (e.g. am I exploring all possible predictors, am I testing specific alternative hypotheses, am I trying to predict the magnitude of effect of a particular predictor on my response variable?). This is a lot to break down here but you can find the paper (HERE)[https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/ecy.3336]. What approach you decide is best for your data will determine the motivation for your approach and how you perform the above processes.*
+
+*This following process is in the "exploratory" category in that paper:*
+
 Kyle Edwards Lectures 15 & 16 are on [model selection](https://sites.google.com/site/kyleedwardsresearch/lecture-notes). I'm really not going to focus on the theory all that much here, and rather I'll focus on the practical application of model selection for linear models. 
 
 The goal of model selection is this: there is a perfect model that explains all the pattern and variation in your data, however, you will never know this perfect model and so, instead, you are aiming to find a model that best approximates this magical unicorn model. (Kyle Edwards goes into more detail).
@@ -358,7 +364,7 @@ You *can* use AIC values with non-nested models, meaning I could compare a model
 
 So, let's fit an AIC to our model and then extend that to compare it to other models!
 
-The basic `summary()` function for models prints an AIC value for that model, however, this value is not necessarily the value we should be using here (we should use AICc most of the time, as I mentioned before for small datasets). (Furthermore, and not to go into too much detail here, but for mixed models, you'll want to do all the model selection steps with a different maximum likelihood estimator, set by putting a `REML=FALSE` argument into your model. [info here](http://users.stat.umn.edu/~gary/classes/5303/handouts/REML.pdf)).
+The `summary()` function for models prints an AIC value for that model, however, this value is not necessarily the value we should be using here (we should use AICc most of the time, as I mentioned before for small datasets). (Furthermore, and not to go into too much detail here, but for mixed models, you'll want to do all the model selection steps with a different maximum likelihood estimator, set by putting a `REML=FALSE` argument into your model. [info here](http://users.stat.umn.edu/~gary/classes/5303/handouts/REML.pdf)).
 
 
 ```{r}
@@ -371,6 +377,8 @@ For this model, the AIC value from the `summary()` function and the AIC value fr
 
 Now lets compare this model to all models with any combination of the predictors in this model, which is really saying: 
 While I expect that x and z could predict y, it could be that one explains more of the variation in the data and that the other adds so little to that variation that the parameter number "penalty" part of the AIC equation ($2K$) is outweighing the parameter number "reward" ($log(L(\hat\theta|Y))$).
+
+*Note: again, this is in the "exploratory" category of statistical approaches. If I wanted to have a more inference-based approach, I might a priori say "Is water temp, cover, or water temp and cover important for salamander count" and the statistical method here would be to just test those models against each other.*
 
 The `AICc()` function comes from the `MuMIn` package, as does the next function: `dredge()`, which we will be using. However, to use `dredge()` without possibly getting an error for the model producing different NA values for each model (`dredge()` won't work to compare different datasets), we have to first add an NA action to the model, and then run `dredge()`.
 
@@ -385,6 +393,8 @@ model <- glm(count ~ cover + Wtemp,
 ```{r}
 dredge(model)
 ```
+
+**Warning**: I would not recommend using the `dredge()` function in a paper most of the time. Especially if you have lots of predictors, this function will test all possible combinations of predictors and many of those models may not be ecologically motivated. Instead, you might want to take the inference approach I mentioned above and test a specific subset of models that represent alternative hypotheses for how environmental variables are shaping salamander abundance.  
 
 Now we have a bunch of AICc values to compare, along with a "delta" value for each, which is just the difference between that model and the "best" model of the list. A rule of thumb: **delta = 2** is a good cutoff for choosing between two models (AIC is on the log scale, so anything with an AIC value of 2 difference is 2 orders of magnitude, or 100 times different). In this case, our top two models are within 2 AICc values of each other - which happens quite often. In this case, I usually go for the **more simple model** of the two, which in this case is the model with just `cover` as a predictor of `count`. (I got this approach from Zuur, but could be good to read up on it on your own. You can also report both, and use `emmeans()` or other functions to determine marginal significance/p-values down the line). In general, choosing the top model from all of these models is also a totally appropriate approach, even if the next model is "close" in AIC values (see what I mean about the "lots of approaches to stats"?)
 
@@ -450,13 +460,21 @@ For a linear relationship like this one, you might also want to know the $R^2$ v
 r2(best_model)
 ```
 
+An $R^2$ value gives you a value of the amount of variation in your data that is explained by the model. 
+
+You could also determine the confidence intervals for this model as an additional validation of how well it explains the variation in the data. I'll use the `confint` function in the `MASS` package.
+
+```{r}
+confint(best_model)
+```
+
 In your final paper, your model selection methods could sound like:
 
 **Methods:**
-We wanted to know which stream abiotic conditions influenced salamander abundance. To do this, we fit generalized linear models with a poisson distribution (for count data) with two important stream attributes, water temperature and woody debris cover as predictors and salamander count as a dependent variable. We performed model selection using AICc and ensured that models fit assumptions using model diagnostics. We ran all statistical analysis in R (Cite with version) using the [package for glm]. We selected models using AICc with the MuMIn package and performed all model diagnostics in DHARMa (CITE packages).
+We wanted to know which stream abiotic conditions influenced salamander abundance. To do this, we fit generalized linear models with a poisson distribution (for count data) with two important stream attributes, water temperature and woody debris cover as predictors and salamander count as a dependent variable. We performed model selection using AICc by comparing *[exploratory (again, advisable with a few variables): "all possible models"; or inference: "a subset of models a, b, and c based on alternative hypotheses"]* and ensured that models fit assumptions using model diagnostics. We ran all statistical analysis in R (Cite with version) using the [package for glm]. We selected models using AICc with the MuMIn package and performed all model diagnostics in DHARMa (CITE packages).
 
 **Results:**
-The best fitting model for salamander abundance included woody debris cover as a predictor variable ($\beta$ = 0.278, p-value < 0.001, $R^2$ = 0.1). There were on average x%/Xx/[some human-friendly value] more salamanders in a stream with 50% woody debris cover as one with no debris cover. 
+The best fitting model for salamander abundance included woody debris cover as a predictor variable ($\beta$ = 0.278, $R^2$ = 0.1, CI = __). There were on average x%/Xx/[some human-friendly value] more salamanders in a stream with 50% woody debris cover as one with no debris cover. 
 
 ## {#top}
 
