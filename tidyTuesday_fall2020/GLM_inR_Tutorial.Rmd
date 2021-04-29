@@ -344,7 +344,7 @@ In this model summary, the factors I usually look at include `Estimate` for each
 
 #### Note: what is the aim of your statistical approach?
 
-*There's  a great recent (2021) paper on being very specific about what the aim of your statistical approach is, and thus, how this model selection process should look (e.g. am I exploring all possible predictors, am I testing specific alternative hypotheses, am I trying to predict the magnitude of effect of a particular predictor on my response variable?). This is a lot to break down here but you can find the paper (HERE)[https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/ecy.3336]. What approach you decide is best for your data will determine the motivation for your approach and how you perform the above processes.*
+*There's  a great recent (2021) paper on being very specific about what the aim of your statistical approach is, and thus, how this model selection process should look (e.g. am I exploring all possible predictors, am I testing specific alternative hypotheses, am I trying to predict the magnitude of effect of a particular predictor on my response variable?). This is a lot to break down here but you can find the paper [HERE](https://esajournals.onlinelibrary.wiley.com/doi/abs/10.1002/ecy.3336). What approach you decide is best for your data will determine the motivation for your approach and how you perform the above processes.*
 
 *This following process is in the "exploratory" category in that paper:*
 
